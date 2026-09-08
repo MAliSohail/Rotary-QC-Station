@@ -1,4 +1,4 @@
-# Rotary QC Station
+# Quality Control Station
 
 <img width="1920" height="1080" alt="qc station preview" src="https://github.com/user-attachments/assets/f469bd7c-c957-47e0-a812-ab7a591ed1cc" />
 
