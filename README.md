@@ -1,137 +1,52 @@
-# Rotary Defect Inspection Station
+# Rotary QC Station
 
-A Flask-based inspection station that rotates a part through four camera angles and classifies each view automatically using a trained image classification model. Built as part of a team project (Advanced Embedded Systems, HSHL). The flagship demo use case is mold detection on a food production line, but the turntable/camera/classifier pipeline works with any item and any visual defect the model is trained to catch.
+<img width="1920" height="1080" alt="qc station preview" src="https://github.com/user-attachments/assets/f469bd7c-c957-47e0-a812-ab7a591ed1cc" />
 
-## How it works
+## What this is
 
-1. An operator places a part on the turntable and presses the Arduino button.
-2. The Arduino notifies the Raspberry Pi over HTTP.
-3. The Pi drives the Arduino turntable to four fixed angles (0, 60, 120, 180 degrees).
-4. At each angle the Pi sends a capture command to the ESP32-CAM over MQTT.
-5. The ESP32-CAM takes a photo and uploads the original JPEG to the Pi over HTTP.
-6. The Pi runs the image through a TFLite classification model and records a PASS or REJECT label with a confidence score for that view.
-7. Once all four views are captured and classified, the Pi computes the final result. Any rejected view produces a final REJECT; four passed views produce a final PASS.
-8. Hardware or communication failures at any stage produce a SYSTEM_ERROR result instead.
-9. Every inspection is saved in its own folder with a `result.json` containing the full record.
+This project is a small automated inspection station that checks food items for mold before they move further down a production or packaging line. A part is placed on a turntable, a camera photographs it from four angles, and each photo is checked by a TFLite image classification model trained to recognize mold. If any angle shows signs of mold, the item is rejected. If all four look clean, it passes.
 
-The dashboard shows live status, the four captured images, and each view's classification and confidence as the inspection runs.
+The goal is to take a task that is usually done by a person glancing at a product and make it consistent, fast, and hands-off.
 
-## My contribution
+## Why this matters
 
-- ESP32-CAM firmware (`firmware/esp32_mqtt`) — image capture, MQTT command handling
-- Arduino turntable firmware (`firmware/arduino_http`) — rotation control over HTTP
-- Pi-side coordination layer (`services/camera_mqtt.py`, `services/arduino.py`) — MQTT/HTTP messaging, command acknowledgement, timeout and failure handling
-- Flask dashboard (`app.py`, `templates/`, `static/`)
-- Integrating the trained classifier into the pipeline (`services/classifier.py`)
+The primary use case for this is in food quality inspection. Visual inspection for mold is a common step in food quality control, but doing it by eye has real limits. People get tired, get distracted, and see things differently from one shift to the next. Mold can also be easy to miss if it has only started forming on the underside or back of an item, since a quick glance usually only covers what is facing up.
 
-The classification model itself (`model.tflite`) was trained by a teammate as part of the wider team project. The full team repo, including SysML documentation and a manual-inspection variant, is here: [link to team repo].
+Rotating the item and checking it from four separate angles is meant to close that gap. It also removes the inconsistency that comes with human judgment. This means the same item is very likely to get the same result whether it is the first inspection of the day or the last.
 
-## Project structure
+## What it does
 
-```text
-rotary-defect-inspection-station/
-├── app.py                      # Flask routes and inspection sequence
-├── config.py                   # IP addresses, ports, topics, timeouts, model settings
-├── config.env.example          # Template — copy to config.env and fill in
-├── model.tflite                 # Trained image classification model
-├── requirements.txt
-├── setup.sh
-├── start.sh
-├── services/
-│   ├── arduino.py               # Arduino HTTP client
-│   ├── camera_mqtt.py           # MQTT capture command handling
-│   ├── classifier.py            # TFLite inference and image preprocessing
-│   └── storage.py               # Inspection folders and result.json
-├── templates/
-│   └── dashboard.html
-├── static/
-│   ├── dashboard.css
-│   └── dashboard.js
-├── firmware/
-│   ├── arduino_http/
-│   │   ├── arduino_http.ino
-│   │   └── secrets.h            # Wi-Fi + Pi address — fill in your own
-│   └── esp32_mqtt/
-│       ├── esp32_mqtt.ino
-│       └── secrets.h            # Wi-Fi + Pi/MQTT address — fill in your own
-└── data/
-    └── inspections/              # Created at runtime, one folder per inspection
-```
+- Detects when an item has been placed for inspection.
+- Physically rotates the item to four fixed positions.
+- Photographs the item at each position.
+- Automatically classifies each photo as clean or moldy.
+- Produces one final result for the item: PASS if every angle looks clean, REJECT if mold is detected at any angle.
+- Flags the inspection as an error rather than guessing, if a camera, sensor, or connection fails partway through.
+- Keeps a record of every inspection, including the photos and the result, so decisions can be reviewed later.
 
-## Installation
+## What it does not do
 
-### Raspberry Pi (coordinator)
+This is a working prototype, not a certified food-safety system. It does not replace regulatory inspection processes, and it is not tuned for any specific food product, packaging type, or lighting environment out of the box. The classification model would need to be trained on real samples of the target food item before this could be trusted for anything beyond testing and demonstration.
 
-```bash
-git clone https://github.com/MAliSohail/Rotary-Defect-Inspection-Station.git
-cd Rotary-Defect-Inspection-Station
-chmod +x setup.sh start.sh
-./setup.sh
-cp config.env.example config.env
-nano config.env   # set the Arduino's IP address
-```
+It also inspects one item at a time. There is no conveyor integration, batching, or multi-item tracking. It is meant to prove out the approach, not to run a full production line.
 
-Confirm the MQTT broker (Mosquitto) is running on the Pi:
+## How it is put together
 
-```bash
-sudo systemctl status mosquitto --no-pager
-```
+The station is made of a few physical and software pieces working together:
 
-Start the server:
+- **A turntable (powered by a servo motor) with a button**, so an operator can place an item and start an inspection with a single press.
+- **An ESP32-CAM** that takes a photo each time the turntable reaches one of its four positions.
+- **A Raspberry Pi 4** that coordinates everything: it tells the turntable where to move, tells the ESP32-CAM when to take a photo, runs each photo through the mold-detection model, and works out the final result.
+- **A trained TFLite classification model** that looks at a single photo and decides whether it shows mold. This runs directly on the onboard computer, so no internet connection or external service is needed to get a result.
+- **A live Flask dashboard**, viewable from any browser on the same network, that shows the current state of the inspection, the four photos as they come in, and the final result.
 
-```bash
-./start.sh
-```
+The pieces communicate over a local network, using a mix of direct requests and a lightweight messaging system built for this kind of device-to-device communication. This keeps each component simple and lets any single piece, like the ESP32-CAM or the servo, be swapped out or upgraded without redesigning the whole system.
 
-Open the dashboard from any device on the same network:
+## Where this could go from here
 
-```text
-http://<PI_IP>:5000
-```
+A few natural next steps, if this were taken further:
 
-### Firmware (ESP32-CAM and Arduino)
-
-For each sketch under `firmware/`:
-
-1. Fill in your Wi-Fi credentials and the Pi's IP address in `secrets.h`.
-2. Upload through the Arduino IDE.
-
-## Classification model
-
-The station uses a TFLite model (`model.tflite`) exported from Teachable Machine. Input is a 224x224 RGB image; output is a two-class softmax score (PASS, REJECT).
-
-Preprocessing before inference:
-
-1. Center-crop the captured JPEG to a square.
-2. Resize to 224x224 using nearest-neighbor interpolation.
-3. Scale pixel values to the range -1 to 1.
-
-To use a different model, replace `model.tflite` and update `CLASSIFIER_MODEL_PATH`, `CLASSIFIER_LABELS`, and `CLASSIFIER_INPUT_SIZE` in `config.py` to match.
-
-## Main API routes
-
-```text
-GET  /
-GET  /api/health
-GET  /api/status
-POST /api/inspection/start
-POST /api/inspection/<id>/image
-GET  /api/inspection/<id>/image/<view>
-```
-
-## Inspection output
-
-```text
-data/inspections/QC-YYYYMMDD-HHMMSS-xxx/
-├── view_1_000deg.jpg
-├── view_2_060deg.jpg
-├── view_3_120deg.jpg
-├── view_4_180deg.jpg
-└── result.json
-```
-
-Each view in `result.json` records its classification label, confidence, and raw scores from the model.
-
-## Known limitations
-
-This is a working prototype, not a certified inspection system — the model would need training on real samples of the target item before it could be trusted beyond testing and demonstration. It inspects one item at a time (no conveyor integration or batching), and it does not currently resume an in-progress inspection if the Pi restarts mid-run.
+- Training the model on a larger and more varied set of real food photos, to improve accuracy.
+- Recovering an in-progress inspection automatically if the onboard computer restarts mid-run.
+- Adding support for inspecting a continuous stream of items rather than one at a time.
+- Logging longer-term trends, such as reject rates over time, to catch upstream problems earlier.
